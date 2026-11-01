@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { forward } from "@/lib/portaldot";
 export const dynamic = "force-dynamic";
 const DENY = /^(personal_|admin_|debug_|miner_|engine_|eth_sign$|eth_signTransaction$|eth_sendTransaction$|author_(insertKey|rotateKeys|removeExtrinsic|hasKey|hasSessionKeys)$|system_(addReservedPeer|removeReservedPeer|addLogFilter|resetLogFilter)$|offchain_)/;
-const CORS = { "access-control-allow-origin": "*", "access-control-allow-methods": "POST, OPTIONS", "access-control-allow-headers": "content-type", "access-control-expose-headers": "x-halyard-upstream, x-halyard-tried" };
+const CORS = { "access-control-allow-origin": "*", "access-control-allow-methods": "POST, OPTIONS", "access-control-allow-headers": "content-type", "access-control-expose-headers": "x-halyard-upstream, x-halyard-tried, x-halyard-hops" };
 export function OPTIONS() { return new NextResponse(null, { status: 204, headers: CORS }); }
 export async function POST(req: Request) {
   const body = await req.json().catch(() => null);
@@ -10,8 +10,8 @@ export async function POST(req: Request) {
   if (!body || calls.length === 0 || calls.length > 50 || calls.some((c) => typeof c?.method !== "string" || DENY.test(c.method)))
     return NextResponse.json({ jsonrpc: "2.0", id: null, error: { code: -32600, message: "invalid or disallowed request (Halyard policy)" } }, { status: 400, headers: CORS });
   try {
-    const { upstream, tried, json } = await forward("substrate", body);
-    return NextResponse.json(json, { headers: { ...CORS, "x-halyard-upstream": upstream, "x-halyard-tried": tried.join(",") } });
+    const { upstream, tried, hops, json } = await forward("substrate", body);
+    return NextResponse.json(json, { headers: { ...CORS, "x-halyard-upstream": upstream, "x-halyard-tried": tried.join(","), "x-halyard-hops": String(hops.length) } });
   } catch (e) {
     return NextResponse.json({ jsonrpc: "2.0", id: null, error: { code: -32603, message: "all upstreams failed: " + (e as Error).message } }, { status: 502, headers: CORS });
   }

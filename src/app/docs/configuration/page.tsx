@@ -2,8 +2,9 @@ export default function P() { return (<>
 <h1>Configuration & local dev</h1>
 <p>No keys are required. Defaults target the public Portaldot V3 testnet.</p>
 <table><thead><tr><th>Variable</th><th>Default</th><th>Purpose</th></tr></thead><tbody>
-<tr><td><code>PORTALDOT_SUBSTRATE_RPCS</code></td><td>https://test-node-v3.portaldot.dev</td><td>comma-separated Substrate HTTP endpoints</td></tr>
+<tr><td><code>PORTALDOT_SUBSTRATE_RPCS</code></td><td>https://test-node-v3.portaldot.dev, wss://test-node-v3.portaldot.dev</td><td>comma-separated Substrate endpoints (https or wss), failover order</td></tr>
 <tr><td><code>PORTALDOT_EVM_RPCS</code></td><td>https://test-evm-rpc-v3.portaldot.dev</td><td>comma-separated EVM endpoints</td></tr>
+<tr><td><code>HALYARD_SENTINEL_RPCS</code></td><td>wss://mainnet.portaldot.io</td><td>probed + fingerprinted, never routed</td></tr>
 <tr><td><code>HALYARD_PIN_SUBSTRATE_GENESIS</code></td><td>testnet genesis</td><td>expected Substrate genesis</td></tr>
 <tr><td><code>HALYARD_PIN_EVM_GENESIS</code></td><td>testnet EVM genesis</td><td>expected EVM block 0 hash</td></tr>
 <tr><td><code>HALYARD_PIN_CHAIN_ID</code></td><td>420420777</td><td>expected EVM chain ID</td></tr>

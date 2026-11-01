@@ -16,7 +16,9 @@ Halyard treats RPC as a control plane:
 2. **Proves consistency** across runtimes — head drift and finality lag.
 3. **Pins identity** — Substrate + EVM genesis, chain ID 420420777, runtime spec `portaldot-v3 ≥ 3002`.
 4. **Routes** JSON-RPC through `/api/rpc/evm` and `/api/rpc/substrate` with scored failover and a circuit breaker; signing/admin methods are refused.
-5. **Inspects** any block height from both runtimes side by side.
+5. **Drills** outages live: "Kill primary" forces the primary to fail on real traffic; the breaker opens after 3 failures, traffic fails over (HTTPS → WSS ingress), then recovers half-open.
+6. **Quarantines** wrong-network nodes — a mainnet sentinel is probed and rejected by fingerprint, never routed.
+7. **Inspects** any block height from both runtimes side by side.
 
 ## Portaldot integration (live, verified against V3 testnet)
 - Substrate RPC: `system_chain`, `system_health`, `chain_getHeader`, `chain_getFinalizedHead`, `chain_getBlockHash`, `chain_getBlock`, `state_getRuntimeVersion`

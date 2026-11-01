@@ -1,10 +1,11 @@
 "use client";
 import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
+import Drill from "./Drill";
 type Check = { key: string; label: string; expected: string; actual: string; pass: boolean };
-type R = { endpoint: { id: string; vm: string; label: string }; ok: boolean; latencyMs: number; error?: string; head?: number; finalized?: number; chain?: string; runtime?: string; chainId?: number; genesis?: string; peers?: number; checks?: Check[];
+type R = { quarantined?: string | null; endpoint: { id: string; vm: string; label: string; role: string }; ok: boolean; latencyMs: number; error?: string; head?: number; finalized?: number; chain?: string; runtime?: string; chainId?: number; genesis?: string; peers?: number; checks?: Check[];
   health: { score: number; uptime: number | null; p50: number | null; p95: number | null; n: number; breaker: string; history: { ok: boolean; ms: number }[] } };
-type P = { at: string; results: R[]; crossVm: { drift: number | null; finalityLag: number | null; chainIdMatch: boolean; fingerprintOk: boolean } };
+type P = { at: string; results: R[]; crossVm: { drift: number | null; finalityLag: number | null; chainIdMatch: boolean; fingerprintOk: boolean; up: number; total: number } };
 type B = { n: number; substrate: { hash: string; parentHash: string; extrinsics: number }; evm: { hash: string; timestamp: string; txs: number; gasUsed: number } | null; error?: string };
 const short = (h?: string) => (h ? `${h.slice(0, 10)}…${h.slice(-6)}` : "—");
 const METHODS: Record<string, [string, unknown[]][]> = {
@@ -36,7 +37,7 @@ export default function Console() {
     ["Cross-VM drift", d?.crossVm.drift != null ? `${d.crossVm.drift}` : "—", "Substrate head − EVM head", d ? Math.abs(d.crossVm.drift ?? 99) <= 2 : null],
     ["Finality lag", d?.crossVm.finalityLag != null ? `${d.crossVm.finalityLag}` : "—", "blocks behind best", d ? (d.crossVm.finalityLag ?? 99) <= 10 : null],
     ["Fingerprint", d ? (d.crossVm.fingerprintOk ? "PINNED" : "DRIFT") : "—", "genesis · chain ID · runtime", d ? d.crossVm.fingerprintOk : null],
-    ["Endpoints up", d ? `${d.results.filter((r) => r.ok).length}/${d.results.length}` : "—", "across both VMs", d ? d.results.every((r) => r.ok) : null],
+    ["Pool up", d ? `${d.crossVm.up}/${d.crossVm.total}` : "—", "routable endpoints, both VMs", d ? d.crossVm.up === d.crossVm.total : null],
   ];
   return (
     <div className="space-y-6">
@@ -51,10 +52,11 @@ export default function Console() {
         {d?.results.map((r) => (
           <motion.div key={r.endpoint.id} layout initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="card p-5 font-mono text-sm">
             <div className="flex items-center justify-between">
-              <span className={`rounded-md px-2 py-0.5 text-[11px] uppercase ${r.endpoint.vm === "evm" ? "bg-orange-500/15 text-orange-300" : "bg-amber-400/15 text-amber-200"}`}>{r.endpoint.vm}</span>
+              <span className="flex gap-1.5"><span className={`rounded-md px-2 py-0.5 text-[11px] uppercase ${r.endpoint.vm === "evm" ? "bg-orange-500/15 text-orange-300" : "bg-amber-400/15 text-amber-200"}`}>{r.endpoint.vm}</span>{r.endpoint.role === "sentinel" && <span className="rounded-md bg-sky-500/15 px-2 py-0.5 text-[11px] uppercase text-sky-300">sentinel</span>}</span>
               <span className="flex items-center gap-3 text-xs"><span className={`rounded px-1.5 py-0.5 ${r.health.breaker === "closed" ? "text-emerald-300" : "bg-red-500/20 text-red-300"}`}>breaker {r.health.breaker}</span>
                 <span className="flex items-center gap-1.5"><motion.span animate={{ opacity: [1, .3, 1] }} transition={{ repeat: Infinity, duration: 1.6 }} className={`h-2 w-2 rounded-full ${r.ok ? "bg-emerald-400" : "bg-red-500"}`} />{r.ok ? `${r.latencyMs} ms` : "down"}</span></span>
             </div>
+            {r.quarantined && <div className="mt-3 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-[11px] text-red-300">QUARANTINED — {r.chain ?? "foreign network"}: {r.quarantined}. Never routed.</div>}
             <div className="mt-3 flex items-end justify-between"><div className="truncate text-white/85">{r.endpoint.label}</div>
               <div className="text-right"><div className="text-3xl font-semibold text-white">{r.health.score}</div><div className="text-[10px] uppercase text-white/40">score</div></div></div>
             <div className="mt-3 flex h-10 items-end gap-[3px]">{r.health.history.map((h, i) => <motion.div key={i} initial={{ height: 0 }} animate={{ height: h.ok ? `${Math.max(8, Math.min(100, h.ms / 15))}%` : "100%" }} className={`flex-1 rounded-sm ${h.ok ? "bg-gradient-to-t from-orange-600 to-amber-300" : "bg-red-500"}`} />)}</div>
@@ -67,9 +69,10 @@ export default function Console() {
               {r.peers != null && r.peers >= 0 && <><dt>peers</dt><dd>{r.peers}</dd></>}
             </dl> : <p className="mt-3 text-xs text-red-400">{r.error}</p>}
             {r.checks && <div className="mt-4 space-y-1 border-t border-white/5 pt-3">{r.checks.map((c) => (
-              <div key={c.key} className="flex items-center justify-between text-[11px]" title={`expected ${c.expected}`}><span className="text-white/50">{c.label}</span><span className={c.pass ? "text-emerald-300" : "text-red-400"}>{c.pass ? "✓" : "✗"} {c.actual.startsWith("0x") ? short(c.actual) : c.actual}</span></div>))}</div>}
+              <div key={c.key} className="flex items-center justify-between gap-2 text-[11px]" title={`expected ${c.expected}`}><span className="text-white/50">{c.label}</span><span className={c.pass ? "text-emerald-300" : "text-red-400"}>{c.pass ? "✓" : "✗"} {c.actual.startsWith("0x") ? short(c.actual) : c.actual}</span></div>))}</div>}
           </motion.div>))}
       </div>
+      <Drill />
       <div className="grid gap-4 lg:grid-cols-[1.2fr_1fr]">
         <div className="card p-5">
           <div className="flex flex-wrap items-center justify-between gap-3"><div className="text-[11px] uppercase tracking-widest text-white/45">RPC playground · scored failover</div>

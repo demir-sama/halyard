@@ -21,4 +21,12 @@ export default function P() { return (<>
 <pre><code>{`{ "n": 283120,
   "substrate": { "hash": "0x…", "parentHash": "0x…", "stateRoot": "0x…", "extrinsics": 2 },
   "evm": { "hash": "0x…", "parentHash": "0x…", "timestamp": "2026-11-01T22:06:00.000Z", "txs": 0, "gasUsed": 0 } }`}</code></pre>
+<h2>GET /api/drill?vm=substrate|evm&amp;target=&lt;id&gt;&amp;steps=8</h2>
+<p>Outage drill. Replays real JSON-RPC calls (<code>chain_getHeader</code> / <code>eth_blockNumber</code>) against the live pool while forcing <code>target</code> (default: the primary) to fail. It runs on an <strong>isolated ledger</strong> in priority mode, so production routing is never affected. The last two steps end the outage and fast-forward the cooldown to show the half-open recovery.</p>
+<pre><code>{`{ "vm": "substrate", "target": "sub-0", "timeline": [
+  { "step": 1, "phase": "outage", "ok": true, "upstream": "test-node-v3.portaldot.dev · ws",
+    "hops": [{ "id": "sub-0", "ok": false, "breaker": "closed" }, { "id": "sub-1", "ok": true }] },
+  { "step": 3, ..., "hops": [{ "id": "sub-0", "ok": false, "breaker": "open" }, ...] },
+  { "step": 4, ..., "hops": [{ "id": "sub-1", "ok": true }] },          // primary skipped
+  { "step": 7, "phase": "recovery", "hops": [{ "id": "sub-0", "ok": true, "breaker": "closed" }] } ] }`}</code></pre>
 </>); }

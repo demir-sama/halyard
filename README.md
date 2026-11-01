@@ -14,6 +14,9 @@ Portaldot V3 exposes a Substrate runtime and an EVM over the same chain. Halyard
 | **Network fingerprint** | pinned Substrate + EVM genesis, chain ID 420420777, runtime `portaldot-v3 ≥ 3002` |
 | **Scored failover** | 0–100 score from uptime + p50 latency over 60 samples |
 | **Circuit breaker** | 3 failures → open 30 s → half-open trial |
+| **Outage drill** | `GET /api/drill` + console "Kill primary" — real traffic, forced outage, isolated ledger |
+| **Quarantine + sentinels** | fingerprint-failing nodes are never routed; mainnet sentinel proves wrong-network detection |
+| **Dual transport** | https + wss endpoints in one failover pool |
 | **Gateways** | `POST /api/rpc/evm`, `POST /api/rpc/substrate` — batch, CORS, signing/admin methods refused |
 | **Block inspector** | `GET /api/block?n=` — same height from both runtimes |
 | **Console** | live dashboard, latency history, RPC playground |

@@ -1,8 +1,9 @@
 // Portaldot V3 network registry + JSON-RPC helpers (server-side).
-import { record, rank } from "./health";
+import { ledger as defaultLedger, record, type Ledger } from "./health";
 import { checkEvm, checkSubstrate, type Check } from "./fingerprint";
 export type Vm = "substrate" | "evm";
-export interface Endpoint { id: string; vm: Vm; url: string; label: string; }
+export type Role = "primary" | "sentinel";
+export interface Endpoint { id: string; vm: Vm; url: string; label: string; role: Role; transport: "https" | "wss"; }
 
 const list = (v: string | undefined, d: string[]) => (v ? v.split(",").map((s) => s.trim()).filter(Boolean) : d);
 
@@ -13,25 +14,41 @@ export const NETWORK = {
   token: "tPOT",
 };
 
+const mk = (vm: Vm, role: Role, prefix: string) => (url: string, i: number): Endpoint => ({
+  id: `${prefix}-${i}`, vm, url, role, transport: url.startsWith("ws") ? "wss" : "https",
+  label: new URL(url).host + (url.startsWith("ws") ? " · ws" : ""),
+});
+
+/** Routable endpoints (failover pool) plus sentinels (probed + fingerprinted, never routed). */
 export function endpoints(): Endpoint[] {
-  const sub = list(process.env.PORTALDOT_SUBSTRATE_RPCS, ["https://test-node-v3.portaldot.dev"]);
+  const sub = list(process.env.PORTALDOT_SUBSTRATE_RPCS, ["https://test-node-v3.portaldot.dev", "wss://test-node-v3.portaldot.dev"]);
   const evm = list(process.env.PORTALDOT_EVM_RPCS, ["https://test-evm-rpc-v3.portaldot.dev"]);
-  return [
-    ...sub.map((url, i) => ({ id: `sub-${i}`, vm: "substrate" as const, url, label: new URL(url).host })),
-    ...evm.map((url, i) => ({ id: `evm-${i}`, vm: "evm" as const, url, label: new URL(url).host })),
-  ];
+  const sentinels = list(process.env.HALYARD_SENTINEL_RPCS, ["wss://mainnet.portaldot.io"]);
+  return [...sub.map(mk("substrate", "primary", "sub")), ...evm.map(mk("evm", "primary", "evm")), ...sentinels.map(mk("substrate", "sentinel", "sen"))];
+}
+export const routable = (vm: Vm) => endpoints().filter((e) => e.vm === vm && e.role === "primary");
+
+/** One-shot JSON-RPC over WebSocket (Node 22+ global WebSocket). Returns the parsed reply. */
+export function wsCall(url: string, payload: string, timeoutMs = 8000): Promise<unknown> {
+  return new Promise((resolve, reject) => {
+    const ws = new WebSocket(url);
+    const t = setTimeout(() => { ws.close(); reject(new Error("ws timeout")); }, timeoutMs);
+    ws.onopen = () => ws.send(payload);
+    ws.onmessage = (ev) => { clearTimeout(t); ws.close(); try { resolve(JSON.parse(String(ev.data))); } catch (e) { reject(e); } };
+    ws.onerror = () => { clearTimeout(t); reject(new Error("ws connection failed")); };
+  });
+}
+
+async function raw(url: string, body: unknown, timeoutMs: number): Promise<unknown> {
+  if (url.startsWith("ws")) return wsCall(url, JSON.stringify(body), timeoutMs);
+  const r = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), signal: AbortSignal.timeout(timeoutMs), cache: "no-store" });
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  return r.json();
 }
 
 export async function rpc<T = unknown>(url: string, method: string, params: unknown[] = [], timeoutMs = 8000) {
   const t0 = performance.now();
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
-    signal: AbortSignal.timeout(timeoutMs),
-    cache: "no-store",
-  });
-  const json = await res.json();
+  const json = (await raw(url, { jsonrpc: "2.0", id: 1, method, params }, timeoutMs)) as { result?: T; error?: { message?: string } };
   const ms = Math.round(performance.now() - t0);
   if (json.error) throw Object.assign(new Error(json.error.message ?? "rpc error"), { ms });
   return { result: json.result as T, ms };
@@ -40,6 +57,13 @@ export async function rpc<T = unknown>(url: string, method: string, params: unkn
 export interface ProbeResult {
   endpoint: Endpoint; ok: boolean; latencyMs: number; error?: string;
   head?: number; finalized?: number; chain?: string; runtime?: string; chainId?: number; genesis?: string; peers?: number; checks?: Check[];
+}
+
+function quarantine<T extends { endpoint: Endpoint; checks: Check[] }>(r: T): T {
+  const bad = r.checks.filter((c) => !c.pass);
+  if (bad.length) defaultLedger.quarantined.set(r.endpoint.id, bad.map((c) => c.label).join(", ") + " mismatch");
+  else defaultLedger.quarantined.delete(r.endpoint.id);
+  return r;
 }
 
 export async function probe(e: Endpoint): Promise<ProbeResult> {
@@ -52,7 +76,7 @@ export async function probe(e: Endpoint): Promise<ProbeResult> {
       ]);
       const out = { endpoint: e, ok: true, latencyMs: bn.ms, chainId: parseInt(cid.result, 16), head: parseInt(bn.result, 16), genesis: blk.result?.hash };
       record(e.id, true, bn.ms);
-      return { ...out, checks: checkEvm(out) };
+      return quarantine({ ...out, checks: checkEvm(out) });
     }
     const [chain, header, fin, ver, gen, health] = await Promise.all([
       rpc<string>(e.url, "system_chain"),
@@ -69,26 +93,33 @@ export async function probe(e: Endpoint): Promise<ProbeResult> {
       head: parseInt(header.result.number, 16), finalized: parseInt(finHeader.result.number, 16),
       runtime: `${ver.result.specName}@${ver.result.specVersion}`, genesis: gen.result, peers: health.result.peers,
     };
-    return { ...out, checks: checkSubstrate(out) };
+    return quarantine({ ...out, checks: checkSubstrate(out) });
   } catch (err) {
     record(e.id, false, 0);
     return { endpoint: e, ok: false, latencyMs: -1, error: (err as Error).message };
   }
 }
 
-// Failover: try healthy endpoints of a VM in latency order.
-export async function forward(vm: Vm, body: unknown) {
-  const eps = rank(endpoints().filter((e) => e.vm === vm));
-  let lastErr = "no endpoints";
-  const tried: string[] = [];
+export type Hop = { endpoint: string; id: string; ok: boolean; ms: number; error?: string; breaker: string };
+
+/** Scored failover. `opts.fail` forces named endpoints to fail (outage drills, isolated ledger only). */
+export async function forward(vm: Vm, body: unknown, opts: { ledger?: Ledger; fail?: Set<string>; pool?: Endpoint[] } = {}) {
+  const L = opts.ledger ?? defaultLedger;
+  const eps = L.rank(opts.pool ?? routable(vm));
+  const hops: Hop[] = [];
   for (const e of eps) {
-    tried.push(e.label);
     const t0 = performance.now();
     try {
-      const r = await fetch(e.url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), signal: AbortSignal.timeout(10000) });
-      if (r.ok) { record(e.id, true, Math.round(performance.now() - t0)); return { upstream: e.label, tried, json: await r.json() }; }
-      lastErr = `HTTP ${r.status}`; record(e.id, false, 0);
-    } catch (err) { lastErr = (err as Error).message; record(e.id, false, 0); }
+      if (opts.fail?.has(e.id)) { await new Promise((r) => setTimeout(r, 40)); throw new Error("simulated outage"); }
+      const json = await raw(e.url, body, 10000);
+      const ms = Math.round(performance.now() - t0);
+      L.record(e.id, true, ms);
+      hops.push({ endpoint: e.label, id: e.id, ok: true, ms, breaker: L.breaker(e.id) });
+      return { upstream: e.label, tried: hops.map((h) => h.endpoint), hops, json };
+    } catch (err) {
+      L.record(e.id, false, 0);
+      hops.push({ endpoint: e.label, id: e.id, ok: false, ms: Math.round(performance.now() - t0), error: (err as Error).message, breaker: L.breaker(e.id) });
+    }
   }
-  throw new Error(lastErr);
+  throw Object.assign(new Error(hops.length ? hops[hops.length - 1].error : "no endpoints"), { hops });
 }

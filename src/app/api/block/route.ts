@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server";
-import { endpoints, rpc } from "@/lib/portaldot";
+import { routable, rpc } from "@/lib/portaldot";
 import { rank } from "@/lib/health";
 export const dynamic = "force-dynamic";
 // Cross-VM block inspector: the same height seen from Substrate and from the EVM.
 export async function GET(req: Request) {
   const q = new URL(req.url).searchParams.get("n");
-  const sub = rank(endpoints().filter((e) => e.vm === "substrate"))[0];
-  const evm = rank(endpoints().filter((e) => e.vm === "evm"))[0];
+  const sub = rank(routable("substrate"))[0];
+  const evm = rank(routable("evm"))[0];
   try {
     const n = q ? Number(q) : parseInt((await rpc<{ number: string }>(sub.url, "chain_getHeader")).result.number, 16);
     if (!Number.isInteger(n) || n < 0) return NextResponse.json({ error: "n must be a non-negative integer" }, { status: 400 });
