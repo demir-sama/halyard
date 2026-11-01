@@ -4,7 +4,7 @@
 **Tagline:** One rope for both runtimes — the dual-VM RPC control plane for Portaldot V3.
 **Track:** Middleware / multi-chain infrastructure / node tooling
 **GitHub:** https://github.com/demir-sama/halyard
-**Live demo:** <VERCEL_URL>
+**Live demo:** https://halyard-sama-5806.vercel.app
 **Demo video:** <YOUTUBE_URL>
 
 ## Problem

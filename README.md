@@ -2,6 +2,8 @@
 <h1 align="center">Halyard</h1>
 <p align="center"><b>One rope for both runtimes.</b><br/>The dual-VM RPC control plane for Portaldot V3 — Substrate/WASM + EVM.</p>
 
+**Live:** https://halyard-sama-5806.vercel.app
+
 Portaldot V3 exposes a Substrate runtime and an EVM over the same chain. Halyard probes every endpoint on both, proves they describe the same network, scores them, and serves a failover JSON-RPC gateway per VM with a circuit breaker.
 
 ## Features
