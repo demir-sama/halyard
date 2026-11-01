@@ -1,4 +1,6 @@
 // Portaldot V3 network registry + JSON-RPC helpers (server-side).
+import { record, rank } from "./health";
+import { checkEvm, checkSubstrate, type Check } from "./fingerprint";
 export type Vm = "substrate" | "evm";
 export interface Endpoint { id: string; vm: Vm; url: string; label: string; }
 
@@ -37,7 +39,7 @@ export async function rpc<T = unknown>(url: string, method: string, params: unkn
 
 export interface ProbeResult {
   endpoint: Endpoint; ok: boolean; latencyMs: number; error?: string;
-  head?: number; finalized?: number; chain?: string; runtime?: string; chainId?: number; genesis?: string; peers?: number;
+  head?: number; finalized?: number; chain?: string; runtime?: string; chainId?: number; genesis?: string; peers?: number; checks?: Check[];
 }
 
 export async function probe(e: Endpoint): Promise<ProbeResult> {
@@ -48,7 +50,9 @@ export async function probe(e: Endpoint): Promise<ProbeResult> {
         rpc<string>(e.url, "eth_blockNumber"),
         rpc<{ hash: string }>(e.url, "eth_getBlockByNumber", ["0x0", false]),
       ]);
-      return { endpoint: e, ok: true, latencyMs: bn.ms, chainId: parseInt(cid.result, 16), head: parseInt(bn.result, 16), genesis: blk.result?.hash };
+      const out = { endpoint: e, ok: true, latencyMs: bn.ms, chainId: parseInt(cid.result, 16), head: parseInt(bn.result, 16), genesis: blk.result?.hash };
+      record(e.id, true, bn.ms);
+      return { ...out, checks: checkEvm(out) };
     }
     const [chain, header, fin, ver, gen, health] = await Promise.all([
       rpc<string>(e.url, "system_chain"),
@@ -59,26 +63,32 @@ export async function probe(e: Endpoint): Promise<ProbeResult> {
       rpc<{ peers: number }>(e.url, "system_health").catch(() => ({ result: { peers: -1 }, ms: 0 })),
     ]);
     const finHeader = await rpc<{ number: string }>(e.url, "chain_getHeader", [fin.result]);
-    return {
+    record(e.id, true, header.ms);
+    const out = {
       endpoint: e, ok: true, latencyMs: header.ms, chain: chain.result,
       head: parseInt(header.result.number, 16), finalized: parseInt(finHeader.result.number, 16),
       runtime: `${ver.result.specName}@${ver.result.specVersion}`, genesis: gen.result, peers: health.result.peers,
     };
+    return { ...out, checks: checkSubstrate(out) };
   } catch (err) {
+    record(e.id, false, 0);
     return { endpoint: e, ok: false, latencyMs: -1, error: (err as Error).message };
   }
 }
 
 // Failover: try healthy endpoints of a VM in latency order.
 export async function forward(vm: Vm, body: unknown) {
-  const eps = endpoints().filter((e) => e.vm === vm);
+  const eps = rank(endpoints().filter((e) => e.vm === vm));
   let lastErr = "no endpoints";
+  const tried: string[] = [];
   for (const e of eps) {
+    tried.push(e.label);
+    const t0 = performance.now();
     try {
       const r = await fetch(e.url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), signal: AbortSignal.timeout(10000) });
-      if (r.ok) return { upstream: e.label, json: await r.json() };
-      lastErr = `HTTP ${r.status}`;
-    } catch (err) { lastErr = (err as Error).message; }
+      if (r.ok) { record(e.id, true, Math.round(performance.now() - t0)); return { upstream: e.label, tried, json: await r.json() }; }
+      lastErr = `HTTP ${r.status}`; record(e.id, false, 0);
+    } catch (err) { lastErr = (err as Error).message; record(e.id, false, 0); }
   }
   throw new Error(lastErr);
 }

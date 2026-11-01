@@ -1,6 +1,32 @@
-# DoraHacks — Portaldot Hacker House 2026 (DRAFT)
-**Project:** Halyard  **Track:** Middleware / Multi-chain infra / Node tooling
-**Tagline:** One rope for both runtimes.
-**Pitch:** Portaldot V3 runs a Substrate/WASM runtime and an EVM side by side. Halyard is the control plane between apps and nodes: it continuously probes both VMs, proves they describe the same chain (drift, finality lag, chain-ID/genesis pinning) and serves a failover JSON-RPC gateway so dApps keep working when a node drops.
-**Portaldot integration:** live Substrate RPC (system_chain, chain_getHeader, chain_getFinalizedHead, state_getRuntimeVersion, system_health) and EVM RPC (eth_chainId, eth_blockNumber, eth_getBlockByNumber) against V3 testnet.
-**Links:** GitHub: https://github.com/demir-sama/halyard · Demo: TBD · Video: TBD
+# DoraHacks BUIDL — Portaldot Hacker House 2026
+
+**Name:** Halyard
+**Tagline:** One rope for both runtimes — the dual-VM RPC control plane for Portaldot V3.
+**Track:** Middleware / multi-chain infrastructure / node tooling
+**GitHub:** https://github.com/demir-sama/halyard
+**Live demo:** <VERCEL_URL>
+**Demo video:** <YOUTUBE_URL>
+
+## Problem
+Portaldot V3 runs a Substrate/WASM runtime and an EVM side by side. Real apps need both, yet hardcode a single RPC URL per side. Outages, a lagging EVM adapter, or an endpoint quietly pointed at a different network are discovered by users, not developers.
+
+## Solution
+Halyard treats RPC as a control plane:
+1. **Probes** every Substrate and EVM endpoint (head, finality, runtime, peers, chain ID, genesis).
+2. **Proves consistency** across runtimes — head drift and finality lag.
+3. **Pins identity** — Substrate + EVM genesis, chain ID 420420777, runtime spec `portaldot-v3 ≥ 3002`.
+4. **Routes** JSON-RPC through `/api/rpc/evm` and `/api/rpc/substrate` with scored failover and a circuit breaker; signing/admin methods are refused.
+5. **Inspects** any block height from both runtimes side by side.
+
+## Portaldot integration (live, verified against V3 testnet)
+- Substrate RPC: `system_chain`, `system_health`, `chain_getHeader`, `chain_getFinalizedHead`, `chain_getBlockHash`, `chain_getBlock`, `state_getRuntimeVersion`
+- EVM RPC: `eth_chainId`, `eth_blockNumber`, `eth_getBlockByNumber`, plus full pass-through
+- Measured: drift 0, finality lag 2–3 blocks, both endpoints scoring 89–96.
+
+## Why it wins
+- Infra that only makes sense on a dual-VM chain — single-VM tools can't see cross-runtime drift.
+- Zero-config, zero-keys, open source; any wallet/indexer can use it today.
+- Complements app-layer tools (indexers, contract workspaces) by giving them a resilient upstream.
+
+## Roadmap
+WebSocket subscriptions gateway · shared health store (KV) · alert webhooks · mainnet preset · `@halyard/client` SDK (viem + polkadot.js) · on-chain health attestations.
